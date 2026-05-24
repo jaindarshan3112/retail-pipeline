@@ -20,6 +20,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import requests
+from airflow.models import Variable
 
 from airflow import DAG
 from airflow.decorators import task
@@ -98,16 +99,18 @@ with DAG(
         results["products_sample_count"] = len(products)
 
         # FX rates API
-        r = requests.get(FX_API, timeout=10)
+        api_key = Variable.get("exchangerate_api_key")
+        fx_url = f"https://api.exchangerate.host/live?base=USD&access_key={api_key}"
+        r = requests.get(fx_url, timeout=10)
         r.raise_for_status()
         payload = r.json()
-        rates = payload.get("rates", {})
-        if "EUR" not in rates:
+        quotes = payload.get("quotes", {})
+        if "USDEUR" not in quotes:
             raise ValueError(f"exchangerate.host returned unexpected payload: {payload!r}")
-        print(f"✓ exchangerate.host OK. base={payload.get('base')}  rates_count={len(rates)}")
-        print(f"  USD→EUR={rates.get('EUR')}  USD→INR={rates.get('INR')}")
-        results["fx_base"] = payload.get("base")
-        results["fx_rates_count"] = len(rates)
+        print(f"✓ exchangerate.host OK. source={payload.get('source')}  rates_count={len(quotes)}")
+        print(f"  USD→EUR={quotes.get('USDEUR')}  USD→INR={quotes.get('USDINR')}")
+        results["fx_base"] = payload.get("source")
+        results["fx_rates_count"] = len(quotes)
 
         return results
 
