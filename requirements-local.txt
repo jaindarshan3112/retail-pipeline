@@ -1,0 +1,20 @@
+# Dependencies for running pipeline scripts on your laptop directly
+# (run_phase2.py, seed_postgres.py, etc.)
+# 
+# NOT used inside the Airflow container — that uses requirements.txt
+# which gets baked into the Docker image.
+
+# Database connectors
+psycopg[binary]
+snowflake-connector-python[pandas]
+
+# Data handling
+pandas
+pyarrow
+
+# APIs and config
+requests
+python-dotenv
+
+# Synthetic data (for seeding only)
+faker

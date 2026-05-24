@@ -12,14 +12,16 @@ Sequence:
 This is what an Airflow DAG will orchestrate in Phase 3. Running it
 manually first proves each layer works in isolation.
 
+Connection details are auto-loaded from .env at the project root using
+python-dotenv. No need to export anything in your shell.
+
 Usage:
-    # Activate your venv
-    source .venv/bin/activate
+    # 1. Activate your venv
+    source .venv/bin/activate          # Mac/Linux
+    .venv\\Scripts\\activate            # Windows
 
-    # Make sure env vars are exported (or use python-dotenv to load .env)
-    export $(grep -v '^#' .env | xargs)
-
-    # Run!
+    # 2. Make sure .env exists at project root (copied from .env.example)
+    # 3. Run
     python run_phase2.py
 """
 
@@ -34,11 +36,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from tasks.extract import postgres_extractor, api_extractor
-from tasks.load import snowflake_loader
+# IMPORTANT: importing config triggers .env loading via python-dotenv
 from tasks.utils.config import SF, SQL_DIR
 from tasks.utils.logger import get_logger
 from tasks.utils.sql_runner import run_sql_directory
+from tasks.extract import postgres_extractor, api_extractor
+from tasks.load import snowflake_loader
 
 import snowflake.connector
 
@@ -60,7 +63,8 @@ def main() -> int:
 
     # ---------- 1. Extract ---------------------------------------------
     banner("STEP 1/5  EXTRACT FROM POSTGRES")
-    pg_manifest = postgres_extractor.extract_all(run_id=run_id)
+    # local=True → use POSTGRES_HOST_LOCAL (typically 'localhost')
+    pg_manifest = postgres_extractor.extract_all(run_id=run_id, local=True)
 
     banner("STEP 2/5  EXTRACT FROM APIs")
     api_manifest = api_extractor.extract_all(run_id=run_id)

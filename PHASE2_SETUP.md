@@ -18,47 +18,52 @@ Live data from Postgres + APIs flowing through your layered Snowflake warehouse,
 
 ## Step 1: Add the new files to your project
 
-If you're continuing from Phase 1, unzip `retail-pipeline-phase2.zip` over your existing project — it only adds new files, doesn't modify existing ones except `requirements.txt`. The new pieces:
+Unzip `retail-pipeline-phase2.zip` over your existing Phase 1 folder. It adds new files plus updates `.env.example` and `requirements.txt`.
 
-```
-+ infra/snowflake_tables.sql         # RAW table DDL
-+ tasks/utils/config.py              # shared config
-+ tasks/utils/logger.py
-+ tasks/utils/sql_runner.py
-+ tasks/extract/postgres_extractor.py
-+ tasks/extract/api_extractor.py
-+ tasks/load/snowflake_loader.py
-+ sql/staging/*.sql                  # 5 staging files
-+ sql/curated/*.sql                  # 5 curated files
-+ sql/marts/*.sql                    # 3 mart files
-+ sql/validation_queries.sql
-+ run_phase2.py                      # master driver
-```
-
-Commit and push to GitHub.
+Commit and push.
 
 ---
 
-## Step 2: Install Phase 2 Python dependencies in your venv
+## Step 2: Update your .env file
 
-The extractors run on your laptop (not in the Airflow container), so your local venv needs the deps:
+Two important changes:
+
+**A) Add the new `POSTGRES_HOST_LOCAL` variable**
+
+Open your `.env` and add this line below `POSTGRES_HOST`:
 
 ```bash
-source .venv/bin/activate
-
-pip install -r requirements-seed.txt          # already installed if Phase 1 done
-pip install \
-  snowflake-connector-python[pandas] \
-  requests \
-  pandas \
-  pyarrow
+POSTGRES_HOST=host.docker.internal     # already there — for Airflow container
+POSTGRES_HOST_LOCAL=localhost          # NEW — for scripts running on your laptop
 ```
 
-> **Note on versions:** I'm not pinning exact versions here because you mentioned you tweaked them. Use whatever versions you have — the code uses stable APIs that work across the last several major versions of each library.
+The pipeline auto-picks the right one based on where it's running. No more swapping values.
+
+**B) That's it.** Everything else stays the same.
 
 ---
 
-## Step 3: Create the RAW tables in Snowflake
+## Step 3: Install Phase 2 Python dependencies
+
+The extractors run on your laptop (not in the Airflow container), so your local venv needs the deps. There's now a dedicated `requirements-local.txt`:
+
+**Windows (PowerShell or CMD):**
+```powershell
+.venv\Scripts\activate
+pip install -r requirements-local.txt
+```
+
+**Mac/Linux:**
+```bash
+source .venv/bin/activate
+pip install -r requirements-local.txt
+```
+
+This includes `python-dotenv` which auto-loads your `.env` — no shell exports needed, works identically on Windows/Mac/Linux.
+
+---
+
+## Step 4: Create the RAW tables in Snowflake
 
 Open the Snowflake UI → Worksheets → paste the contents of `infra/snowflake_tables.sql` → **Run All**.
 
@@ -71,37 +76,15 @@ The `SHOW` statements at the end confirm everything exists.
 
 ---
 
-## Step 4: Make sure your .env is loaded
-
-The Phase 2 driver reads connection params from environment variables. The easiest way to load them from `.env`:
-
-```bash
-# Mac/Linux
-set -a; source .env; set +a
-
-# Or one-line equivalent
-export $(grep -v '^#' .env | xargs)
-```
-
-Verify:
-```bash
-echo $SNOWFLAKE_ACCOUNT   # should print your account, not be empty
-echo $POSTGRES_HOST       # should print 'host.docker.internal' or 'localhost'
-```
-
-> **Important:** for running scripts on your laptop (outside Docker), `POSTGRES_HOST` should be `localhost`, not `host.docker.internal`. The latter is only for the Airflow container. Either:
-> - Edit `.env` to use `localhost` for running scripts directly, then change it back when running Airflow
-> - Or override on the command line: `POSTGRES_HOST=localhost python run_phase2.py`
-
----
-
 ## Step 5: Run the full pipeline
+
+That's it — no env-var dance, no shell tricks:
 
 ```bash
 python run_phase2.py
 ```
 
-You should see ~90 seconds of output ending with something like:
+The script auto-loads `.env` via `python-dotenv` at startup. You should see ~90 seconds of output ending with:
 
 ```
 ======================================================================
@@ -113,8 +96,6 @@ Rows loaded to RAW:
   order_items        302,847
   products                20
   fx_rates               170
-
-Next: open Snowflake → run queries in sql/validation_queries.sql
 ```
 
 ---
@@ -141,51 +122,49 @@ The other queries verify business logic (no NULL FX rates, no orphan items, sens
 
 ---
 
-## What you've actually built
+## How `.env` loading works (worth understanding)
 
-```
-Postgres (laptop)              ┐
-  customers, orders, items     │
-                               │      run_phase2.py
-APIs (internet)                ├─────────────────────► Snowflake
-  products, fx_rates           │                         RAW (5 tables)
-                               ┘                          ↓
-                                                        STAGING (5 tables, deduped/typed)
-                                                          ↓
-                                                        CURATED (3 dims + 2 facts)
-                                                          ↓
-                                                        MARTS (3 aggregates)
-```
+1. You run `python run_phase2.py`
+2. Python imports `run_phase2.py` → which imports `tasks.utils.config`
+3. At the top of `config.py`, this line runs:
+   ```python
+   load_dotenv(PROJECT_ROOT / ".env", override=False)
+   ```
+4. `python-dotenv` reads `.env` and sets each `KEY=value` as an environment variable for the current process
+5. Then `os.getenv("SNOWFLAKE_ACCOUNT")` etc. just work
 
-Every layer is **idempotent** — rerun `run_phase2.py` and you get identical results (because we TRUNCATE + reload in RAW, and CREATE OR REPLACE in STAGING/CURATED/MARTS).
+`override=False` means: if a variable is already set in the shell (e.g. by Airflow), don't override it. This is the safe default — production environments inject vars through other means.
+
+**This works identically on Windows, Mac, and Linux. No `export`, no `set`, no shell-specific syntax.**
 
 ---
 
 ## Common issues
 
-**`SNOWFLAKE_ACCOUNT must be set`**
-Your `.env` wasn't loaded into the current shell. Re-run the export command in Step 4.
+**`SNOWFLAKE_ACCOUNT and SNOWFLAKE_PASSWORD must be set in your .env file`**
+The `.env` file isn't being found, or those values are empty. Check:
+- File is at the project root (same level as `run_phase2.py`)
+- File is literally named `.env` (not `.env.txt` — Windows likes to add hidden extensions)
+- The values aren't still set to `replace_with_...`
 
 **`connection to server failed: Connection refused`**
-The Postgres host in your `.env` is `host.docker.internal` (for Airflow). For local scripts, override:
-```bash
-POSTGRES_HOST=localhost python run_phase2.py
-```
+Postgres host issue. Make sure you added `POSTGRES_HOST_LOCAL=localhost` to your `.env`. Verify Postgres is running on your laptop:
+- Windows: `Get-Service postgresql*` in PowerShell
+- Mac: `brew services list`
+- Linux: `sudo systemctl status postgresql`
 
 **`Object 'RAW.ETL_STAGE' does not exist`**
-You haven't run `infra/snowflake_tables.sql` yet. Step 3.
+You haven't run `infra/snowflake_tables.sql` yet. Step 4.
 
 **`Numeric value 'X' is not recognized` during COPY INTO**
-Your Parquet file has a column type that doesn't match the RAW table. Check that the Postgres seeder ran successfully and produced the expected schema (`\d orders` in psql).
+Your Parquet file has a column type mismatch. Re-run the seed script to regenerate clean data.
 
 **Pipeline ran but `MARTS.REVENUE_BY_CATEGORY` is empty**
-The `FCT_ORDER_ITEMS` references products by ID (1-20 from fakestoreapi), and your seeded order_items use `product_id` in range 1-20 too. If you changed `PRODUCT_ID_RANGE` in `seed_postgres.py`, they won't join. Either reseed with the default range, or adjust.
+The `FCT_ORDER_ITEMS` references products by ID (1-20 from fakestoreapi). If you changed `PRODUCT_ID_RANGE` in `seed_postgres.py`, IDs won't join.
 
 ---
 
 ## What's next
-
-Once your validation queries look healthy:
 
 ```bash
 git add .
@@ -193,6 +172,6 @@ git commit -m "Phase 2 complete: end-to-end pipeline working manually"
 git push
 ```
 
-Then we move to **Phase 3: Airflow DAG**. The amazing thing you'll notice: Phase 3 reuses 100% of the Python and SQL you just built. Airflow just orchestrates these existing pieces — that's the power of clean separation of concerns.
+Then we move to **Phase 3: Airflow DAG**. The amazing thing: Phase 3 reuses 100% of the Python and SQL you just built. Airflow just orchestrates these existing pieces.
 
 Phase 4 then converts from full-load to **incremental load** with watermarking, which is where the production-grade patterns really kick in.

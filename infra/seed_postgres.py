@@ -16,18 +16,29 @@ import os
 import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import psycopg
+from dotenv import load_dotenv
 from faker import Faker
 
+# Load .env from project root so seeding uses the same credentials
+# as the rest of the pipeline.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+
 # ---------- Config -----------------------------------------------------
+# Note: When running this script on your laptop, POSTGRES_HOST should be
+# 'localhost'. The 'host.docker.internal' value in .env is only for the
+# Airflow container — but here we always want to talk to local Postgres,
+# so we force 'localhost' as the default.
 
 PG_CONN = {
-    "host":     os.getenv("PG_HOST", "localhost"),
-    "port":     int(os.getenv("PG_PORT", "5432")),
-    "dbname":   os.getenv("PG_DB",   "northwind_oltp"),
-    "user":     os.getenv("PG_USER", "northwind_user"),
-    "password": os.getenv("PG_PASSWORD", "northwind_pass"),
+    "host":     os.getenv("POSTGRES_HOST_LOCAL", "localhost"),
+    "port":     int(os.getenv("POSTGRES_PORT", "5432")),
+    "dbname":   os.getenv("POSTGRES_DB",   "northwind_oltp"),
+    "user":     os.getenv("POSTGRES_USER", "northwind_user"),
+    "password": os.getenv("POSTGRES_PASSWORD", "northwind_pass"),
 }
 
 N_CUSTOMERS   = 10_000

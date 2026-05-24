@@ -2,11 +2,18 @@
 Central configuration for the retail pipeline.
 
 All extractors, loaders, and runners read connection details from here.
-Values come from environment variables (or a .env file), with sensible
-defaults that match PHASE1_SETUP.md.
+Values come from environment variables, which are loaded from a `.env`
+file at the project root using `python-dotenv`.
 
-This means you can change a database name, schema, or warehouse in ONE
-place and the entire pipeline picks it up.
+This means:
+  - You never have to `export` anything in your shell
+  - It works identically on Windows, Mac, and Linux
+  - The script is self-contained and reproducible
+  - Changing a value in `.env` is picked up on next run
+
+Import order matters: `load_dotenv()` runs at module import time, before
+any os.getenv() calls. So as long as any module imports `tasks.utils.config`
+early, env vars are populated for the rest of the program.
 """
 
 from __future__ import annotations
@@ -15,24 +22,56 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 # --- Project paths -----------------------------------------------------
 
 # Resolve to the repo root regardless of where you run scripts from
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SQL_DIR      = PROJECT_ROOT / "sql"
-EXTRACT_DIR  = Path(os.getenv("EXTRACT_DIR", "/tmp/retail_extract"))
+
+# Load .env from project root BEFORE reading any env vars below.
+# `override=False` means existing shell env vars take precedence over
+# .env values (good for Airflow, which sets connection vars differently).
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+
+# EXTRACT_DIR can be overridden via env var; default lives under project
+EXTRACT_DIR = Path(os.getenv("EXTRACT_DIR", PROJECT_ROOT / "local_data" / "extracts"))
 
 
 # --- Postgres (source OLTP) --------------------------------------------
 
 @dataclass(frozen=True)
 class PostgresConfig:
+    """
+    Postgres connection config.
+
+    By default, uses POSTGRES_HOST from .env (set to 'host.docker.internal'
+    so Airflow container can reach laptop Postgres).
+
+    For scripts running on the laptop directly (run_phase2.py, seed_postgres.py),
+    call `PostgresConfig.for_local_use()` to get a config that uses
+    POSTGRES_HOST_LOCAL instead (typically 'localhost').
+
+    This avoids the need to switch .env values between contexts.
+    """
     host:     str = os.getenv("POSTGRES_HOST",     "localhost")
     port:     int = int(os.getenv("POSTGRES_PORT", "5432"))
     database: str = os.getenv("POSTGRES_DB",       "northwind_oltp")
     user:     str = os.getenv("POSTGRES_USER",     "northwind_user")
     password: str = os.getenv("POSTGRES_PASSWORD", "northwind_pass")
+
+    @classmethod
+    def for_local_use(cls) -> "PostgresConfig":
+        """Return a config that uses POSTGRES_HOST_LOCAL (defaults to 'localhost')."""
+        return cls(
+            host=os.getenv("POSTGRES_HOST_LOCAL", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.getenv("POSTGRES_DB",       "northwind_oltp"),
+            user=os.getenv("POSTGRES_USER",     "northwind_user"),
+            password=os.getenv("POSTGRES_PASSWORD", "northwind_pass"),
+        )
 
     def conn_kwargs(self) -> dict:
         return {
@@ -59,7 +98,7 @@ class SnowflakeConfig:
         if not self.account or not self.password:
             raise ValueError(
                 "SNOWFLAKE_ACCOUNT and SNOWFLAKE_PASSWORD must be set "
-                "in your .env file."
+                "in your .env file at the project root."
             )
         return {
             "account":   self.account,
@@ -82,11 +121,8 @@ class APIConfig:
 
 # --- Pipeline-wide constants -------------------------------------------
 
-# Snowflake internal stage we'll use for landing files.
-# Lives in RAW schema; we create it in infra/snowflake_tables.sql
 SNOWFLAKE_STAGE = "RAW.ETL_STAGE"
 
-# Source-table → RAW-table mapping. Single source of truth.
 TABLE_MAPPING = {
     "customers":   "RAW.CUSTOMERS",
     "orders":      "RAW.ORDERS",

@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 import psycopg
 
-from tasks.utils.config import PG, EXTRACT_DIR
+from tasks.utils.config import PG, PostgresConfig, EXTRACT_DIR
 from tasks.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -31,6 +31,11 @@ log = get_logger(__name__)
 
 # Tables to extract, in dependency-safe order
 TABLES = ["customers", "orders", "order_items"]
+
+
+def _get_pg_config(local: bool) -> PostgresConfig:
+    """Pick the right Postgres host based on execution context."""
+    return PostgresConfig.for_local_use() if local else PG
 
 
 def _read_table_to_df(conn: psycopg.Connection, table: str) -> pd.DataFrame:
@@ -53,9 +58,14 @@ def _write_parquet(df: pd.DataFrame, table: str, run_id: str) -> Path:
     return out_path
 
 
-def extract_all(run_id: str | None = None) -> dict[str, dict]:
+def extract_all(run_id: str | None = None, local: bool = False) -> dict[str, dict]:
     """
     Extract all Postgres tables.
+
+    Args:
+        run_id: Optional run identifier. Defaults to current UTC timestamp.
+        local:  If True, use POSTGRES_HOST_LOCAL (for laptop scripts).
+                If False, use POSTGRES_HOST (for Airflow container).
 
     Returns a manifest dict:
         {
@@ -65,10 +75,11 @@ def extract_all(run_id: str | None = None) -> dict[str, dict]:
         }
     """
     run_id = run_id or datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-    log.info(f"=== Postgres extraction (run_id={run_id}) ===")
+    cfg = _get_pg_config(local)
+    log.info(f"=== Postgres extraction (run_id={run_id}, host={cfg.host}) ===")
 
     manifest: dict[str, dict] = {}
-    with psycopg.connect(**PG.conn_kwargs()) as conn:
+    with psycopg.connect(**cfg.conn_kwargs()) as conn:
         for table in TABLES:
             df   = _read_table_to_df(conn, table)
             path = _write_parquet(df, table, run_id)
@@ -80,4 +91,5 @@ def extract_all(run_id: str | None = None) -> dict[str, dict]:
 
 
 if __name__ == "__main__":
-    extract_all()
+    # Standalone runs are by definition on the laptop
+    extract_all(local=True)
