@@ -115,7 +115,7 @@ class SnowflakeConfig:
 @dataclass(frozen=True)
 class APIConfig:
     products_url: str = "https://fakestoreapi.com/products"
-    fx_url:       str = "https://api.exchangerate.host/latest?base=USD"
+    fx_url:       str = "https://api.exchangerate.host/live?base=USD&access_key=e4d6b6547b301457a8122a446fbf58f9"
     timeout_sec:  int = 30
 
 

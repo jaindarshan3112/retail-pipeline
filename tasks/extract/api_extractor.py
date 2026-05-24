@@ -59,15 +59,36 @@ def extract_products(run_id: str) -> dict:
     return {"path": path, "row_count": len(products)}
 
 
+# def extract_fx_rates(run_id: str) -> dict:
+#     """Fetch the latest USD-base FX rates and flatten to one row per currency."""
+#     log.info(f"  GET {API.fx_url}")
+#     resp = requests.get(API.fx_url, timeout=API.timeout_sec)
+#     resp.raise_for_status()
+#     payload = resp.json()
+#     base = payload.get("base", "USD")
+#     rate_date = payload.get("date")
+#     rates = payload.get("rates", {})
+#     if not rates:
+#         raise ValueError(f"FX API returned no rates: {payload!r}")
+
 def extract_fx_rates(run_id: str) -> dict:
     """Fetch the latest USD-base FX rates and flatten to one row per currency."""
     log.info(f"  GET {API.fx_url}")
     resp = requests.get(API.fx_url, timeout=API.timeout_sec)
     resp.raise_for_status()
     payload = resp.json()
-    base = payload.get("base", "USD")
-    rate_date = payload.get("date")
-    rates = payload.get("rates", {})
+
+    # currencylayer uses "source" and "quotes", not "base" and "rates"
+    base = payload.get("source") or payload.get("base", "USD")
+    rate_date = payload.get("date") or str(datetime.utcfromtimestamp(payload["timestamp"]).date())
+
+    # currencylayer prefixes keys with base currency e.g. "USDEUR" → strip to "EUR"
+    raw_quotes = payload.get("quotes") or payload.get("rates", {})
+    rates = {
+        k[len(base):]: v
+        for k, v in raw_quotes.items()
+    } if raw_quotes else {}
+
     if not rates:
         raise ValueError(f"FX API returned no rates: {payload!r}")
 
