@@ -45,7 +45,33 @@ def _read_table_to_df(conn: psycopg.Connection, table: str) -> pd.DataFrame:
         cur.execute(f"SELECT * FROM {table}")
         cols = [d[0] for d in cur.description]
         rows = cur.fetchall()
-    return pd.DataFrame(rows, columns=cols)
+    df = pd.DataFrame(rows, columns=cols)
+
+    # IMPORTANT: pandas defaults to nanosecond-precision timestamps, which
+    # Snowflake's Parquet reader can mis-interpret as seconds. Force every
+    # datetime column down to microsecond precision (us) — that's what
+    # Postgres uses natively and what Snowflake expects without ambiguity.
+    #
+    # Two cases to handle:
+    #   1. TIMESTAMPTZ from Postgres → pandas dtype "datetime64[ns, UTC]"
+    #      (timezone-aware). We must strip TZ before changing precision,
+    #      otherwise pandas raises TypeError.
+    #   2. Plain TIMESTAMP → pandas dtype "datetime64[ns]" (naive).
+    #      Direct astype works.
+    #
+    # We standardize on UTC-then-naive: convert to UTC, then drop the tz.
+    # This loses no information (everything is in UTC) and gives Snowflake
+    # a clean microsecond-precision integer to ingest.
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            # Detect tz-aware without using deprecated API
+            if isinstance(s.dtype, pd.DatetimeTZDtype):
+                # tz-aware → convert to UTC, strip tz, then drop precision
+                s = s.dt.tz_convert("UTC").dt.tz_localize(None)
+            df[col] = s.astype("datetime64[us]")
+
+    return df
 
 
 def _write_parquet(df: pd.DataFrame, table: str, run_id: str) -> Path:
@@ -53,7 +79,14 @@ def _write_parquet(df: pd.DataFrame, table: str, run_id: str) -> Path:
     out_dir = EXTRACT_DIR / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{table}.parquet"
-    df.to_parquet(out_path, index=False, engine="pyarrow")
+    # Use the modern pyarrow timestamp resolution that Snowflake understands.
+    df.to_parquet(
+        out_path,
+        index=False,
+        engine="pyarrow",
+        coerce_timestamps="us",       # force microsecond precision
+        allow_truncated_timestamps=True,
+    )
     log.info(f"  wrote {len(df):>8,} rows → {out_path}")
     return out_path
 

@@ -64,9 +64,9 @@ CREATE OR REPLACE TABLE RAW.CUSTOMERS (
     customer_segment  VARCHAR,
     country           VARCHAR,
     signup_date       DATE,
-    created_at        TIMESTAMP_TZ,
-    modified_at       TIMESTAMP_TZ,
-    _load_ts          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+    created_at        TIMESTAMP_NTZ,
+    modified_at       TIMESTAMP_NTZ,
+    _load_ts          TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     _source_file      VARCHAR
 );
 
@@ -78,9 +78,9 @@ CREATE OR REPLACE TABLE RAW.ORDERS (
     shipping_country  VARCHAR,
     currency_code     VARCHAR,
     total_amount      NUMBER(12,2),
-    created_at        TIMESTAMP_TZ,
-    modified_at       TIMESTAMP_TZ,
-    _load_ts          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+    created_at        TIMESTAMP_NTZ,
+    modified_at       TIMESTAMP_NTZ,
+    _load_ts          TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     _source_file      VARCHAR
 );
 
@@ -90,8 +90,8 @@ CREATE OR REPLACE TABLE RAW.ORDER_ITEMS (
     product_id        NUMBER,
     quantity          NUMBER,
     unit_price        NUMBER(12,2),
-    created_at        TIMESTAMP_TZ,
-    _load_ts          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+    created_at        TIMESTAMP_NTZ,
+    _load_ts          TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     _source_file      VARCHAR
 );
 
@@ -100,13 +100,13 @@ CREATE OR REPLACE TABLE RAW.ORDER_ITEMS (
 
 CREATE OR REPLACE TABLE RAW.PRODUCTS (
     raw_data          VARIANT,
-    _load_ts          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+    _load_ts          TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     _source_file      VARCHAR
 );
 
 CREATE OR REPLACE TABLE RAW.FX_RATES (
     raw_data          VARIANT,
-    _load_ts          TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+    _load_ts          TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     _source_file      VARCHAR
 );
 

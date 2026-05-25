@@ -120,34 +120,61 @@ def _fetch_loaded_rowcount(cur) -> int:
 
 
 # ---------- Column maps -----------------------------------------------
-# For Parquet ingestion, we list columns explicitly so the COPY is
-# self-documenting and resilient if extra columns appear.
+# Each column gets a SELECT expression rather than just a cast type. This
+# matters for timestamps: Parquet stores them as integers, but pandas /
+# pyarrow / Snowflake can disagree on the precision (s vs ms vs us vs ns)
+# encoded by those integers.
+#
+# Our extractor writes microsecond-precision timestamps via pandas
+# `datetime64[us]`. To remove any ambiguity, we do the conversion
+# explicitly in SQL:  TO_TIMESTAMP_NTZ(value_us / 1_000_000)
+# (Snowflake's TO_TIMESTAMP_NTZ(seconds) accepts a fractional seconds
+# value and resolves microseconds correctly.)
+#
+# Each entry is (column_name, sql_expression). The expression uses
+# `$1:column_name` to reference the column from the staged Parquet file.
 
-_COL_MAPS = {
+_COL_MAPS: dict[str, list[tuple[str, str]]] = {
     "RAW.CUSTOMERS": [
-        "customer_id", "email", "first_name", "last_name",
-        "customer_segment", "country", "signup_date",
-        "created_at", "modified_at",
+        ("customer_id",      "$1:customer_id::NUMBER"),
+        ("email",            "$1:email::VARCHAR"),
+        ("first_name",       "$1:first_name::VARCHAR"),
+        ("last_name",        "$1:last_name::VARCHAR"),
+        ("customer_segment", "$1:customer_segment::VARCHAR"),
+        ("country",          "$1:country::VARCHAR"),
+        ("signup_date",      "$1:signup_date::DATE"),
+        ("created_at",       "TO_TIMESTAMP_NTZ($1:created_at::NUMBER / 1000000)"),
+        ("modified_at",      "TO_TIMESTAMP_NTZ($1:modified_at::NUMBER / 1000000)"),
     ],
     "RAW.ORDERS": [
-        "order_id", "customer_id", "order_date", "status",
-        "shipping_country", "currency_code", "total_amount",
-        "created_at", "modified_at",
+        ("order_id",         "$1:order_id::NUMBER"),
+        ("customer_id",      "$1:customer_id::NUMBER"),
+        ("order_date",       "$1:order_date::DATE"),
+        ("status",           "$1:status::VARCHAR"),
+        ("shipping_country", "$1:shipping_country::VARCHAR"),
+        ("currency_code",    "$1:currency_code::VARCHAR"),
+        ("total_amount",     "$1:total_amount::NUMBER(12,2)"),
+        ("created_at",       "TO_TIMESTAMP_NTZ($1:created_at::NUMBER / 1000000)"),
+        ("modified_at",      "TO_TIMESTAMP_NTZ($1:modified_at::NUMBER / 1000000)"),
     ],
     "RAW.ORDER_ITEMS": [
-        "order_item_id", "order_id", "product_id",
-        "quantity", "unit_price", "created_at",
+        ("order_item_id",    "$1:order_item_id::NUMBER"),
+        ("order_id",          "$1:order_id::NUMBER"),
+        ("product_id",       "$1:product_id::NUMBER"),
+        ("quantity",         "$1:quantity::NUMBER"),
+        ("unit_price",       "$1:unit_price::NUMBER(12,2)"),
+        ("created_at",       "TO_TIMESTAMP_NTZ($1:created_at::NUMBER / 1000000)"),
     ],
 }
 
 
 def _business_columns_for(table: str) -> str:
-    return ", ".join(_COL_MAPS[table])
+    return ", ".join(col_name for col_name, _ in _COL_MAPS[table])
 
 
 def _select_columns_for(table: str) -> str:
-    # Pulls each named column from the Parquet file by name (case-insensitive).
-    return ", ".join(f"$1:{c}::variant" for c in _COL_MAPS[table])
+    # Each column has its full SELECT expression already
+    return ", ".join(expr for _, expr in _COL_MAPS[table])
 
 
 # ---------- TRUNCATE before load (Phase 2 only) -----------------------
